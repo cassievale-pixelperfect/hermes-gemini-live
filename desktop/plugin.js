@@ -403,6 +403,27 @@ function answerApproval (choice) {
   ws.send(JSON.stringify({ type: 'approval', id, choice }))
 }
 
+// The relay is a PLUGIN socket. On a local (native) gateway it authenticates with the
+// one-use native-http grant that Desktop main injects as a request header on the dial
+// minted by getPluginWsUrl. resolveSiblingWsUrl instead mints the /api/ws interactive
+// grant and rewrites the path — a credential the plugin gate refuses (4401), so prefer
+// the plugin door when the bridge offers it. null means a non-native backend: fall back
+// to the sibling resolver, whose ?token= is the credential on token-mode remotes.
+async function resolveRelayUrl () {
+  const mint = window.hermesDesktop && window.hermesDesktop.getPluginWsUrl
+  if (mint) {
+    const minted = await Promise.race([
+      mint({ pluginId: 'hermes-gemini-live', path: '/relay' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out preparing the relay socket')), 15000))
+    ])
+    if (typeof minted === 'string' && minted) return minted
+    if (minted && minted.refused === 'permission') {
+      throw new Error('the gateway refused the relay credential (permission)')
+    }
+  }
+  return resolveSiblingWsUrl({}, RELAY_PATH)
+}
+
 async function start (rest) {
   if (call.state !== 'idle') return
   call.state = 'connecting'
@@ -421,7 +442,7 @@ async function start (rest) {
   call.player = call.player || createPlayer()
   let url
   try {
-    url = await resolveSiblingWsUrl({}, RELAY_PATH)
+    url = await resolveRelayUrl()
   } catch (error) {
     tearDown(message(error))
     return

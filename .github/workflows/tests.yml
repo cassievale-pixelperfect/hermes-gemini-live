@@ -46,3 +46,14 @@ jobs:
           if [ -n "$bad" ]; then
             echo "imports outside the plugin SDK surface:"; echo "$bad"; exit 1
           fi
+      # A plugin WebSocket on a local native gateway authenticates with the native-http
+      # grant Desktop main injects on a getPluginWsUrl dial. The /api/ws sibling credential
+      # resolveSiblingWsUrl mints is refused 4401 by the plugin gate, so the relay must keep
+      # the plugin door (it may still fall back to the sibling resolver for token-mode remotes).
+      - name: relay dials through the plugin socket door
+        run: |
+          set -e
+          if ! grep -q "getPluginWsUrl" desktop/plugin.js; then
+            echo "desktop/plugin.js must mint the relay URL via getPluginWsUrl (native-http grant)"
+            exit 1
+          fi

@@ -121,6 +121,7 @@ same home's `.env`.
 
 | Symptom | What it actually means | Fix |
 |---|---|---|
+| Gateway logs `refused an unauthorized /relay upgrade` in a loop; the call never leaves `Connecting` | The relay dial carried the `/api/ws` sibling credential (`resolveSiblingWsUrl`), which a plugin socket's gate refuses on a local native gateway — plugin sockets ride the `native-http` grant main injects on a `getPluginWsUrl` dial. | Update the plugin (the relay now mints via `getPluginWsUrl`) and restart Desktop. |
 | Panel says `backend: 404 {"detail":"Plugin not found"}` | **This home has the plugin disabled** — not a routing bug. The mount happens once, but the runtime gate re-reads `plugins.enabled` on every request. | `hermes plugins enable hermes-gemini-live` in the home the Desktop is serving |
 | `Hermes work is unavailable: no API_SERVER_KEY for profile 'alpha'` | A multiplexed gateway authorises `/p/<profile>/v1/…` with **that profile's own** key and deliberately does not inherit the owner's (`api_server.py:1530-1545`). | Put `API_SERVER_KEY` in *that profile's* `.env` |
 | Control call answers 404 `run_not_found` for a run you started | Ownership is by idempotency scope, and the submitting session key **is** that scope. | Send the same `X-Hermes-Session-Key` you submitted with |
