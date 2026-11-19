@@ -21,8 +21,10 @@ Audio relays through Hermes' own backend, which holds the key.
 
 - **Hermes Agent with the Desktop app.** The composer control is a Desktop plugin; the CLI,
   TUI and messaging gateways get the delegated work but no microphone.
-- **A running gateway with the `api_server` platform** (default port **8642**). Without it the
-  call still works as pure conversation and the panel states that Hermes work is unavailable.
+- **A running gateway with the `api_server` platform enabled** (default port **8642**) and an
+  `API_SERVER_KEY` in the serving home's `.env` — see
+  [Turn on delegated work](#turn-on-delegated-work-the-agent-lane). Without it the call still
+  works as pure conversation and the panel states that Hermes work is unavailable.
 - **A Google AI Studio API key.** The free tier works; there is no OAuth path here.
 - **Nothing to install on the Python side.** `websockets`, `aiohttp` and `httpx` already ship in
   the Hermes runtime, and this plugin deliberately declares no dependencies (see
@@ -85,6 +87,39 @@ On Windows, `ln -s` inside Git Bash silently performs a **recursive copy** inste
 prefer PowerShell's `New-Item -ItemType Junction`. Each home then needs its own enable and, for
 delegated runs, its own `API_SERVER_KEY` (see [Troubleshooting](#troubleshooting)).
 
+## Turn on delegated work (the agent lane)
+
+Voice conversation needs only the Gemini key. Letting the model hand real jobs to Hermes while
+you talk additionally needs the gateway's OpenAI-compatible API — the `api_server` platform —
+because that is the door the relay submits and tracks runs through. Two things must be true in
+the home serving the call, and **both** need a gateway restart to take effect:
+
+1. **The platform is enabled.** It is off by default; a key alone does not start it.
+
+   ```bash
+   hermes config set platforms.api_server.enabled true
+   ```
+
+2. **`API_SERVER_KEY` is set.** This is a shared bearer secret between the gateway and the
+   relay — **you generate it yourself**; it is not a credential from Google, Nous, or any
+   provider. Both sides read the same variable, so one entry keeps them matched:
+
+   ```bash
+   # macOS/Linux — append a fresh random secret to the serving home's .env
+   printf 'API_SERVER_KEY=%s\n' "$(openssl rand -hex 32)" >> ~/.hermes/.env
+   ```
+
+   On Windows (PowerShell): `Add-Content $env:USERPROFILE\.hermes\.env "API_SERVER_KEY=$(-join ((48..57)+(97..102) | Get-Random -Count 64 | ForEach-Object {[char]$_}))"`
+
+Then restart the gateway (`hermes gateway restart`) and confirm the door is up:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8642/v1/models   # 401 = listening and gated (good); 000 = not running
+```
+
+A `401` without a key is the healthy answer — it means the platform is listening and refusing
+unauthenticated calls. The panel's lane state flips to configured on the next call.
+
 ## What you get
 
 | | |
@@ -121,6 +156,9 @@ same home's `.env`.
 
 | Symptom | What it actually means | Fix |
 |---|---|---|
+| Gateway logs `refused an unauthorized /relay upgrade` in a loop; the call never leaves `Connecting` | The relay dial carried the `/api/ws` sibling credential (`resolveSiblingWsUrl`), which a plugin socket's gate refuses on a local native gateway — plugin sockets ride the `native-http` grant main injects on a `getPluginWsUrl` dial. | Update the plugin (the relay now mints via `getPluginWsUrl`) and restart Desktop. |
+| Relay logs `agent lane unavailable (unauthorized: no API_SERVER_KEY configured)` | The serving home's `.env` has no `API_SERVER_KEY`. Voice chat works; delegated Hermes work does not. | Generate one and append it to that home's `.env`, then restart the gateway — see [Turn on delegated work](#turn-on-delegated-work-the-agent-lane). |
+| Key is set but the panel still says Hermes work is unavailable | The `api_server` platform is not enabled, so nothing listens on 8642 — the key alone does not start it (`curl http://127.0.0.1:8642/v1/models` answers `000`/connection refused). | `hermes config set platforms.api_server.enabled true`, then restart the gateway. |
 | Panel says `backend: 404 {"detail":"Plugin not found"}` | **This home has the plugin disabled** — not a routing bug. The mount happens once, but the runtime gate re-reads `plugins.enabled` on every request. | `hermes plugins enable hermes-gemini-live` in the home the Desktop is serving |
 | `Hermes work is unavailable: no API_SERVER_KEY for profile 'alpha'` | A multiplexed gateway authorises `/p/<profile>/v1/…` with **that profile's own** key and deliberately does not inherit the owner's (`api_server.py:1530-1545`). | Put `API_SERVER_KEY` in *that profile's* `.env` |
 | Control call answers 404 `run_not_found` for a run you started | Ownership is by idempotency scope, and the submitting session key **is** that scope. | Send the same `X-Hermes-Session-Key` you submitted with |
